@@ -2,6 +2,8 @@
 
 Widget de escritorio para Linux que muestra el clima en tiempo real con iconos animados y efectos visuales.
 
+![Weather Widget](icon.png)
+
 ## Características
 
 | Feature | Descripción |
@@ -59,6 +61,17 @@ El widget aparecerá en la esquina inferior derecha de la pantalla.
 | WeatherAPI | 2ª | Requiere API key |
 | 7Timer | 3ª | Gratuita, alternativa |
 
+## Iconos
+
+El repositorio incluye múltiples versiones del icono:
+
+| Archivo | Descripción |
+|---------|-------------|
+| `icon.png` | Icono principal (sol + nube + lluvia) |
+| `icon.svg` | Versión SVG del icono principal |
+| `icon-minimal.png` | Versión minimalista |
+| `icon-clean.png` | Versión limpia y moderna |
+
 ## Estructura
 
 ```
@@ -66,6 +79,10 @@ Weather-Widget/
 ├── weather_widget.py    # Widget principal (PyQt6)
 ├── appPyQt.py           # Versión alternativa
 ├── requirements.txt     # Dependencias
+├── icon.png             # Icono principal
+├── icon.svg             # Icono SVG
+├── icon-minimal.png     # Icono minimalista
+├── icon-clean.png       # Icono limpio
 └── .gitignore
 ```
 

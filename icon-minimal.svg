@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200">
+  <defs>
+    <linearGradient id="minimalSky" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#64B5F6;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#1976D2;stop-opacity:1" />
+    </linearGradient>
+  </defs>
+  
+  <!-- Background -->
+  <rect x="0" y="0" width="200" height="200" rx="20" fill="url(#minimalSky)" />
+  
+  <!-- Sun (simple circle) -->
+  <circle cx="75" cy="75" r="35" fill="#FFD54F" />
+  
+  <!-- Cloud (simplified) -->
+  <path d="M120,100 Q140,80 160,100 Q180,100 180,120 Q180,140 160,140 L100,140 Q80,140 80,120 Q80,100 100,100 Q100,80 120,100 Z" fill="#FFFFFF" />
+</svg>

@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200">
+  <defs>
+    <linearGradient id="cleanSky" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#90CAF9;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#42A5F5;stop-opacity:1" />
+    </linearGradient>
+  </defs>
+  
+  <!-- Background -->
+  <circle cx="100" cy="100" r="95" fill="url(#cleanSky)" />
+  
+  <!-- Sun -->
+  <circle cx="70" cy="70" r="30" fill="#FFCA28" />
+  
+  <!-- Sun rays (simplified) -->
+  <g stroke="#FFCA28" stroke-width="4" stroke-linecap="round">
+    <line x1="70" y1="25" x2="70" y2="15" />
+    <line x1="70" y1="115" x2="70" y2="125" />
+    <line x1="25" y1="70" x2="15" y2="70" />
+    <line x1="115" y1="70" x2="125" y2="70" />
+  </g>
+  
+  <!-- Cloud (clean shape) -->
+  <path d="M120,95 Q145,75 170,95 Q195,95 195,115 Q195,135 170,135 L95,135 Q70,135 70,115 Q70,95 95,95 Q95,75 120,95 Z" fill="#FFFFFF" />
+  
+  <!-- Rain drops -->
+  <g fill="#1976D2" opacity="0.9">
+    <rect x="108" y="145" width="4" height="12" rx="2" />
+    <rect x="123" y="150" width="4" height="12" rx="2" />
+    <rect x="138" y="145" width="4" height="12" rx="2" />
+    <rect x="153" y="150" width="4" height="12" rx="2" />
+  </g>
+</svg>
