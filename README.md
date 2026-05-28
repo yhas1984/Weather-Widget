@@ -2,8 +2,6 @@
 
 Widget de escritorio para Linux que muestra el clima en tiempo real con iconos animados y efectos visuales.
 
-![Weather Widget](icon.png)
-
 ## Características
 
 | Feature | Descripción |
