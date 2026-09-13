@@ -25,6 +25,16 @@ class DailyForecast:
     sunrise: Optional[datetime] = None
     sunset: Optional[datetime] = None
 
+    @property
+    def temp_max(self) -> float:
+        """Compatibility alias used by the V6 renderer."""
+        return self.temperature_max
+
+    @property
+    def temp_min(self) -> float:
+        """Compatibility alias used by the V6 renderer."""
+        return self.temperature_min
+
 
 @dataclass(slots=True)
 class WeatherData:
