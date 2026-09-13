@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import math
 import random
-from datetime import datetime
 
 from PyQt6.QtCore import QPoint, QPointF, QRectF, Qt, QThreadPool, QTimer
 from PyQt6.QtGui import QColor, QFont, QLinearGradient, QPainter, QPainterPath, QPen, QRadialGradient
@@ -40,9 +39,20 @@ class PremiumWeatherWidget(QMainWindow):
         self.setWindowTitle("Weather Widget 6")
         self.resize(360, self.COLLAPSED)
         self.setMinimumWidth(340)
-        self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnBottomHint)
-        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
+        self.setWindowFlags(
+            Qt.WindowType.FramelessWindowHint
+            | Qt.WindowType.WindowStaysOnBottomHint
+            | Qt.WindowType.Tool
+        )
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        self.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, True)
+        self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, True)
+
+        # On X11, mark the window as a true desktop surface. This prevents
+        # "Show Desktop"/Alt+Tab desktop actions from hiding it like a normal app.
+        desktop_attr = getattr(Qt.WidgetAttribute, "WA_X11NetWmWindowTypeDesktop", None)
+        if desktop_attr is not None:
+            self.setAttribute(desktop_attr, True)
 
         screen = self.screen().availableGeometry()
         saved = self.settings.get("position")
@@ -59,7 +69,16 @@ class PremiumWeatherWidget(QMainWindow):
         self.animation_timer.timeout.connect(self.animate)
         self.animation_timer.start(50)
 
+        self.position_timer = QTimer(self)
+        self.position_timer.timeout.connect(self.maintain_desktop_state)
+        self.position_timer.start(2000)
+
         QTimer.singleShot(150, self.refresh_weather)
+
+    def maintain_desktop_state(self):
+        if not self.isVisible():
+            self.show()
+        self.lower()
 
     def refresh_weather(self):
         if self.loading:
@@ -129,15 +148,32 @@ class PremiumWeatherWidget(QMainWindow):
         refresh = menu.addAction("Actualizar ahora")
         city = menu.addAction("Cambiar ciudad…")
         menu.addSeparator()
+
         theme_menu = menu.addMenu("Apariencia")
         atmospheric = theme_menu.addAction("Atmospheric")
         glass = theme_menu.addAction("Glass")
         minimal = theme_menu.addAction("Minimal")
+
+        transparency_menu = menu.addMenu("Transparencia")
+        transparency_actions = {}
+        current_opacity = float(self.settings.get("opacity", 0.55))
+        for label, opacity in (
+            ("35% · Muy transparente", 0.35),
+            ("50% · Transparente", 0.50),
+            ("65% · Equilibrado", 0.65),
+            ("80% · Sólido", 0.80),
+        ):
+            action = transparency_menu.addAction(label)
+            action.setCheckable(True)
+            action.setChecked(abs(current_opacity - opacity) < 0.03)
+            transparency_actions[action] = opacity
+
         animation = menu.addAction("Animaciones")
         animation.setCheckable(True)
         animation.setChecked(bool(self.settings.get("animations", True)))
         menu.addSeparator()
         quit_action = menu.addAction("Salir")
+
         chosen = menu.exec(event.globalPos())
         if chosen == refresh:
             self.refresh_weather()
@@ -145,6 +181,10 @@ class PremiumWeatherWidget(QMainWindow):
             self.change_city()
         elif chosen in (atmospheric, glass, minimal):
             self.settings["theme"] = chosen.text()
+            save_settings(self.settings)
+            self.update()
+        elif chosen in transparency_actions:
+            self.settings["opacity"] = transparency_actions[chosen]
             save_settings(self.settings)
             self.update()
         elif chosen == animation:
@@ -163,7 +203,11 @@ class PremiumWeatherWidget(QMainWindow):
 
     def paintEvent(self, event):
         painter = QPainter(self)
+        painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_Source)
+        painter.fillRect(self.rect(), Qt.GlobalColor.transparent)
+        painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceOver)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
         card = QRectF(6, 6, self.width() - 12, self.height() - 12)
         self.draw_card(painter, card)
         if not self.weather:
@@ -183,10 +227,14 @@ class PremiumWeatherWidget(QMainWindow):
 
     def draw_card(self, p: QPainter, rect: QRectF):
         theme = self.settings.get("theme", "Atmospheric")
+        opacity = min(0.90, max(0.25, float(self.settings.get("opacity", 0.55))))
+        base_alpha = int(255 * opacity)
+
         path = QPainterPath()
         path.addRoundedRect(rect, 24, 24)
+
         if theme == "Minimal":
-            p.fillPath(path, QColor(12, 16, 24, 170))
+            p.fillPath(path, QColor(10, 14, 22, max(55, int(base_alpha * 0.78))))
         else:
             gradient = QLinearGradient(rect.topLeft(), rect.bottomRight())
             if self.weather:
@@ -207,10 +255,21 @@ class PremiumWeatherWidget(QMainWindow):
                     end = tuple(max(5, int(c * .62)) for c in end)
             else:
                 start, end = (42, 60, 88), (17, 23, 37)
-            gradient.setColorAt(0, QColor(*start, 238))
-            gradient.setColorAt(1, QColor(*end, 245))
+
+            if theme == "Glass":
+                start = tuple(min(255, c + 18) for c in start)
+                end = tuple(min(255, c + 10) for c in end)
+                a0 = int(base_alpha * 0.72)
+                a1 = int(base_alpha * 0.82)
+            else:
+                a0 = base_alpha
+                a1 = min(230, base_alpha + 12)
+
+            gradient.setColorAt(0, QColor(*start, a0))
+            gradient.setColorAt(1, QColor(*end, a1))
             p.fillPath(path, gradient)
-        p.setPen(QPen(QColor(255, 255, 255, 34), 1))
+
+        p.setPen(QPen(QColor(255, 255, 255, 48), 1))
         p.drawPath(path)
 
     def draw_atmosphere(self, p: QPainter, rect: QRectF):
@@ -333,21 +392,19 @@ class PremiumWeatherWidget(QMainWindow):
             p.drawText(int(x + 6), y + 42, glyph(item.weather_code, True))
 
             p.setFont(QFont("Inter", 8, QFont.Weight.DemiBold))
-            p.drawText(int(x + 4), y + 61, f"{round(item.temp_max)}°")
+            p.drawText(int(x + 4), y + 61, f"{round(item.temperature_max)}°")
             p.setPen(QColor(210, 220, 232, 145))
             p.setFont(QFont("Inter", 7))
-            p.drawText(int(x + 27), y + 61, f"{round(item.temp_min)}°")
+            p.drawText(int(x + 27), y + 61, f"{round(item.temperature_min)}°")
 
     def draw_loading(self, p: QPainter, rect: QRectF):
         p.setPen(QColor(245, 248, 252, 225))
         p.setFont(QFont("Inter", 13, QFont.Weight.DemiBold))
         p.drawText(25, 58, "Weather Widget")
-
         p.setPen(QColor(220, 228, 240, 160))
         p.setFont(QFont("Inter", 9))
         message = "Actualizando el tiempo…" if self.loading else "Preparando el widget…"
         p.drawText(25, 82, message)
-
         p.setPen(QColor(255, 255, 255, 210))
         p.setFont(QFont("Inter", 34))
         p.drawText(25, 145, "◌")
