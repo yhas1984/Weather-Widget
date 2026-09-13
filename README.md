@@ -96,6 +96,25 @@ sudo apt install libxcb-xinerama0
 **Error de API:**
 El widget usa múltiples APIs como respaldo. Si una falla, usa la siguiente automáticamente.
 
+## Instalación desde `.deb`
+
+Los paquetes compilados se publican como assets en la sección [Releases](https://github.com/yhas1984/Weather-Widget/releases). Descarga el archivo `weather-widget_*_amd64.deb` y ejecuta:
+
+```bash
+sudo apt install ./weather-widget_*_amd64.deb
+```
+
+Open-Meteo funciona sin credenciales. WeatherAPI es opcional: define `WEATHERAPI_KEY` en el entorno si quieres habilitar ese respaldo.
+
+## Compilar el `.deb`
+
+```bash
+python -m pip install -r requirements.txt
+bash packaging/build-deb.sh 5.0.1
+```
+
+Al crear un tag `v5.0.1`, GitHub Actions compila el paquete y lo publica automáticamente como asset del release.
+
 ## Licencia
 
 MIT

@@ -30,7 +30,7 @@ WEATHER_APIS = [
     {
         "name": "WeatherAPI Free",
         "url": "http://api.weatherapi.com/v1/current.json",
-        "key": "38e4aa14266b819aa523d444730e1161",
+        "key": os.environ.get("WEATHERAPI_KEY", ""),
         "type": "weatherapi"
     },
     {
