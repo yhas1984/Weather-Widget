@@ -24,7 +24,18 @@ jobs:
       - name: Build package
         run: bash packaging/build-deb.sh "${GITHUB_REF_NAME#v}"
       - name: Publish release asset
-        uses: softprops/action-gh-release@v2
+        uses: ncipollo/release-action@v1
         with:
-          generate_release_notes: true
-          files: weather-widget_*_amd64.deb
+          token: ${{ secrets.GITHUB_TOKEN }}
+          tag: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
+          generateReleaseNotes: true
+          artifacts: weather-widget_*_amd64.deb
+          artifactErrorsFailBuild: true
+      - name: Upload workflow artifact (fallback)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: weather-widget-${{ github.ref_name }}
+          path: weather-widget_*_amd64.deb
+          if-no-files-found: error
