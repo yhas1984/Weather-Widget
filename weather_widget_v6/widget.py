@@ -4,7 +4,7 @@ import math
 import random
 from datetime import datetime
 
-from PyQt6.QtCore import QPoint, QPointF, QRectF, Qt, QThreadPool, QTimer, QEasingCurve
+from PyQt6.QtCore import QPoint, QPointF, QRectF, Qt, QThreadPool, QTimer
 from PyQt6.QtGui import QColor, QFont, QLinearGradient, QPainter, QPainterPath, QPen, QRadialGradient
 from PyQt6.QtWidgets import QInputDialog, QMainWindow, QMenu
 
@@ -192,10 +192,14 @@ class PremiumWeatherWidget(QMainWindow):
             if self.weather:
                 _, kind = condition(self.weather.weather_code)
                 palettes = {
-                    "clear": ((20, 72, 128), (19, 27, 55)), "partly": ((39, 76, 112), (24, 31, 51)),
-                    "cloudy": ((54, 66, 82), (24, 31, 43)), "fog": ((72, 82, 91), (35, 42, 52)),
-                    "rain": ((32, 59, 82), (18, 27, 42)), "drizzle": ((38, 64, 84), (20, 31, 45)),
-                    "snow": ((75, 104, 128), (35, 51, 70)), "storm": ((42, 38, 66), (18, 20, 35)),
+                    "clear": ((20, 72, 128), (19, 27, 55)),
+                    "partly": ((39, 76, 112), (24, 31, 51)),
+                    "cloudy": ((54, 66, 82), (24, 31, 43)),
+                    "fog": ((72, 82, 91), (35, 42, 52)),
+                    "rain": ((32, 59, 82), (18, 27, 42)),
+                    "drizzle": ((38, 64, 84), (20, 31, 45)),
+                    "snow": ((75, 104, 128), (35, 51, 70)),
+                    "storm": ((42, 38, 66), (18, 20, 35)),
                 }
                 start, end = palettes.get(kind, palettes["cloudy"])
                 if not self.weather.is_day:
@@ -275,29 +279,80 @@ class PremiumWeatherWidget(QMainWindow):
         for i, item in enumerate(items):
             x = 22 + i * cell_w
             if i == 0:
-                p.setBrush(QColor(255, 255, 255, 18)); p.setPen(Qt.PenStyle.NoPen)
+                p.setBrush(QColor(255, 255, 255, 18))
+                p.setPen(Qt.PenStyle.NoPen)
                 p.drawRoundedRect(QRectF(x, top + 12, cell_w - 5, 72), 12, 12)
-            p.setPen(QColor(230, 235, 244, 175)); p.setFont(QFont("Inter", 8))
+            p.setPen(QColor(230, 235, 244, 175))
+            p.setFont(QFont("Inter", 8))
             p.drawText(int(x + 7), top + 31, "Ahora" if i == 0 else item.time.strftime("%Hh"))
-            p.setPen(QColor(255, 255, 255, 225)); p.setFont(QFont("Inter", 14))
+            p.setPen(QColor(255, 255, 255, 225))
+            p.setFont(QFont("Inter", 14))
             p.drawText(int(x + 9), top + 52, glyph(item.weather_code, item.is_day))
             p.setFont(QFont("Inter", 9, QFont.Weight.DemiBold))
             p.drawText(int(x + 7), top + 72, f"{round(item.temperature)}°")
 
     def draw_details(self, p: QPainter):
         y = 315
-        metrics = [("Humedad", f"{self.weather.humidity}%"), ("Lluvia", f"{self.weather.precipitation_probability}%"), ("Viento", f"{round(self.weather.wind_speed)} km/h")]
+        metrics = [
+            ("Humedad", f"{self.weather.humidity}%"),
+            ("Lluvia", f"{self.weather.precipitation_probability}%"),
+            ("Viento", f"{round(self.weather.wind_speed)} km/h"),
+        ]
         w = (self.width() - 50) / 3
         for i, (label, value) in enumerate(metrics):
             x = 22 + i * w
-            p.setBrush(QColor(255, 255, 255, 13)); p.setPen(QPen(QColor(255, 255, 255, 18), 1))
+            p.setBrush(QColor(255, 255, 255, 13))
+            p.setPen(QPen(QColor(255, 255, 255, 18), 1))
             p.drawRoundedRect(QRectF(x, y - 17, w - 6, 50), 12, 12)
-            p.setPen(QColor(220, 228, 239, 140)); p.setFont(QFont("Inter", 7))
+            p.setPen(QColor(220, 228, 239, 140))
+            p.setFont(QFont("Inter", 7))
             p.drawText(int(x + 9), y, label.upper())
-            p.setPen(QColor(250, 251, 253, 220)); p.setFont(QFont("Inter", 9, QFont.Weight.DemiBold))
+            p.setPen(QColor(250, 251, 253, 220))
+            p.setFont(QFont("Inter", 9, QFont.Weight.DemiBold))
             p.drawText(int(x + 9), y + 19, value)
 
     def draw_daily(self, p: QPainter):
+        items = self.weather.daily[:5]
+        if not items:
+            return
         y = 387
-        p.setPen(QColor(225, 232, 242, 145)); p.setFont(QFont("Inter", 8, QFont.Weight.DemiBold))
-        p.drawText(25, y, "PRÓX
+        p.setPen(QColor(225, 232, 242, 145))
+        p.setFont(QFont("Inter", 8, QFont.Weight.DemiBold))
+        p.drawText(25, y, "PRÓXIMOS DÍAS")
+
+        cell_w = (self.width() - 44) / len(items)
+        for i, item in enumerate(items):
+            x = 22 + i * cell_w
+            day_label = item.date.strftime("%a").capitalize()
+            p.setPen(QColor(228, 234, 243, 170))
+            p.setFont(QFont("Inter", 8, QFont.Weight.Medium))
+            p.drawText(int(x + 4), y + 22, day_label)
+
+            p.setPen(QColor(255, 255, 255, 225))
+            p.setFont(QFont("Inter", 13))
+            p.drawText(int(x + 6), y + 42, glyph(item.weather_code, True))
+
+            p.setFont(QFont("Inter", 8, QFont.Weight.DemiBold))
+            p.drawText(int(x + 4), y + 61, f"{round(item.temp_max)}°")
+            p.setPen(QColor(210, 220, 232, 145))
+            p.setFont(QFont("Inter", 7))
+            p.drawText(int(x + 27), y + 61, f"{round(item.temp_min)}°")
+
+    def draw_loading(self, p: QPainter, rect: QRectF):
+        p.setPen(QColor(245, 248, 252, 225))
+        p.setFont(QFont("Inter", 13, QFont.Weight.DemiBold))
+        p.drawText(25, 58, "Weather Widget")
+
+        p.setPen(QColor(220, 228, 240, 160))
+        p.setFont(QFont("Inter", 9))
+        message = "Actualizando el tiempo…" if self.loading else "Preparando el widget…"
+        p.drawText(25, 82, message)
+
+        p.setPen(QColor(255, 255, 255, 210))
+        p.setFont(QFont("Inter", 34))
+        p.drawText(25, 145, "◌")
+
+    def closeEvent(self, event):
+        self.settings["position"] = [self.x(), self.y()]
+        save_settings(self.settings)
+        super().closeEvent(event)
