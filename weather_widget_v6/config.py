@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-from dataclasses import asdict
 from pathlib import Path
 
 APP_DIR = Path.home() / ".config" / "weather-widget"
@@ -15,7 +14,7 @@ DEFAULT_SETTINGS = {
     "units": "metric",
     "update_minutes": 15,
     "animations": True,
-    "opacity": 0.92,
+    "opacity": 0.84,
     "compact": False,
     "position": None,
 }
