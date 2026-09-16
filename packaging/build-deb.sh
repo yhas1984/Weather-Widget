@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-VERSION="${1:-5.0.1}"
+VERSION="${1:-5.0.3}"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BUILD="${ROOT}/.package-build"
 DIST="${ROOT}/dist"
@@ -15,7 +15,6 @@ install -m 0755 "${DIST}/WeatherWidget" "${PKG}/opt/weather-widget/WeatherWidget
 
 cat > "${PKG}/usr/bin/weather-widget" <<'EOF'
 #!/bin/sh
-export QT_QPA_PLATFORM="${QT_QPA_PLATFORM:-xcb}"
 exec /opt/weather-widget/WeatherWidget "$@"
 EOF
 chmod 0755 "${PKG}/usr/bin/weather-widget"
@@ -55,4 +54,6 @@ dpkg-deb --build --root-owner-group "${PKG}" "${OUT}"
 dpkg-deb --info "${OUT}"
 dpkg-deb --contents "${OUT}" | grep -E 'opt/weather-widget/WeatherWidget|usr/bin/weather-widget|usr/share/applications|SOURCE.txt'
 file "${DIST}/WeatherWidget"
+(cd "${ROOT}" && sha256sum "$(basename "${OUT}")" > "$(basename "${OUT}").sha256")
 echo "created ${OUT}"
+echo "created ${OUT}.sha256"

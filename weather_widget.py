@@ -1,14 +1,16 @@
 import sys
+import threading
 import requests
 from PyQt6.QtWidgets import QApplication, QMainWindow, QWidget, QMenu
-from PyQt6.QtCore import Qt, QTimer, QPoint, QPointF, QRectF
+from PyQt6.QtCore import QObject, Qt, QTimer, QPoint, QPointF, QRect, QRectF, pyqtSignal
 from PyQt6.QtGui import QPainter, QColor, QPen, QFont, QLinearGradient, QBrush, QPolygonF, QRadialGradient
 import math
 import random
 from datetime import datetime
 import os
 import json
-os.environ["QT_QPA_PLATFORM"] = "xcb"
+from pathlib import Path
+from tempfile import NamedTemporaryFile
 
 # Configurar DPI antes de crear la aplicación
 if hasattr(Qt, 'AA_EnableHighDpiScaling'):
@@ -24,18 +26,18 @@ ICON_STYLE = "emoji"  # "emoji" | "flat" | "minimal"
 WEATHER_APIS = [
     {
         "name": "Open-Meteo",
-        "url": "http://api.open-meteo.com/v1/forecast",
+        "url": "https://api.open-meteo.com/v1/forecast",
         "type": "open-meteo"
     },
     {
         "name": "WeatherAPI Free",
-        "url": "http://api.weatherapi.com/v1/current.json",
+        "url": "https://api.weatherapi.com/v1/current.json",
         "key": os.environ.get("WEATHERAPI_KEY", ""),
         "type": "weatherapi"
     },
     {
         "name": "7Timer",
-        "url": "http://www.7timer.info/bin/api.pl",
+        "url": "https://www.7timer.info/bin/api.pl",
         "type": "7timer"
     }
 ]
@@ -53,22 +55,64 @@ WEATHER_TRANSLATE = {
     "sleet": "Aguanieve", "hail": "Granizo", "windy": "Ventoso"
 }
 
+
+class WeatherWorkerSignals(QObject):
+    result = pyqtSignal(int, object)
+    error = pyqtSignal(int, str)
+    finished = pyqtSignal(int)
+
+
+class WeatherWorker:
+    """Run provider calls away from Qt's UI thread."""
+
+    def __init__(self, request_id, fetch):
+        self.request_id = request_id
+        self.fetch = fetch
+        self.signals = WeatherWorkerSignals()
+        self.thread = threading.Thread(target=self.run, name="classic-weather-fetch", daemon=True)
+
+    def start(self):
+        self.thread.start()
+
+    def run(self):
+        try:
+            self._emit(self.signals.result, self.request_id, self.fetch())
+        except Exception as exc:
+            self._emit(self.signals.error, self.request_id, str(exc))
+        finally:
+            self._emit(self.signals.finished, self.request_id)
+
+    @staticmethod
+    def _emit(signal, *args):
+        try:
+            signal.emit(*args)
+        except RuntimeError:
+            # The widget may have closed while a daemon request was finishing.
+            pass
+
 # ---------------- CLASE WIDGET ----------------
 class WeatherWidget(QMainWindow):
     def __init__(self):
         super().__init__()
         self.show_extra_info = False
-        self.icon_style = ICON_STYLE
+        self.config = self.load_config()
+        saved_style = self.config.get("icon_style", ICON_STYLE)
+        self.icon_style = saved_style if saved_style in {"emoji", "flat", "minimal"} else ICON_STYLE
         self.weather = {
             "temp": "N/A", "desc": "Cargando...", "cloud": 0,
             "humidity": "N/A", "windspeed": "N/A", "feelslike": "N/A",
             "raw_desc": "clear", "pressure": "N/A", "visibility": "N/A"
         }
-        self.resize(280, 215)
+        self.resize(280, 135)
         self.window_id = None
         self.setup_attempts = 0
-        self.config = self.load_config()
-        self.manual_city = self.config.get('manual_city', None)
+        saved_city = self.config.get('manual_city')
+        self.manual_city = saved_city.strip() if isinstance(saved_city, str) and saved_city.strip() else None
+        self.weather_workers = set()
+        self.weather_loading = False
+        self.refresh_pending = False
+        self.weather_request_id = 0
+        self.autostart_scheduled = False
         
         # Variables de arrastre y animación
         self.drag_position = QPoint()
@@ -79,20 +123,23 @@ class WeatherWidget(QMainWindow):
         self.is_closing = False
 
         # Cargar datos en caché si existen
-        cache = self.config.get('cache', {})
-        if cache:
-            self.weather = cache.get('weather', self.weather)
-            self.city = cache.get('city', "Madrid")
+        cache = self.config.get('cache')
+        cached_weather = cache.get('weather') if isinstance(cache, dict) else None
+        required_weather = set(self.weather)
+        if isinstance(cached_weather, dict) and required_weather.issubset(cached_weather):
+            self.weather = {**self.weather, **cached_weather}
+            self.city = str(cache.get('city') or "Ubicación actual")
             print(f"📦 Datos en caché cargados para {self.city}")
         else:
-            self.city = "Madrid"  # Ciudad por defecto
+            self.city = "Ubicación actual"
 
         self.setWindowFlags(
             Qt.WindowType.FramelessWindowHint |
             Qt.WindowType.WindowStaysOnBottomHint
         )
 
-        self.setAttribute(Qt.WidgetAttribute.WA_X11NetWmWindowTypeDock, True)
+        if "xcb" in QApplication.platformName().lower():
+            self.setAttribute(Qt.WidgetAttribute.WA_X11NetWmWindowTypeDock, True)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
 
@@ -112,8 +159,7 @@ class WeatherWidget(QMainWindow):
         self.sun_angle, self.lightning_flash = 0, 0
         self.is_day = True
 
-        screen = QApplication.primaryScreen().geometry()
-        self.base_pos = QPoint(screen.width() - self.width() - 60, screen.height() - self.height() - 60)
+        self.base_pos = self.restore_position()
         self.move(self.base_pos)
 
         self.position_timer = QTimer(self)
@@ -122,7 +168,9 @@ class WeatherWidget(QMainWindow):
 
         self.weather_timer = QTimer(self)
         self.weather_timer.timeout.connect(self.update_weather)
-        self.weather_timer.start(UPDATE_INTERVAL)
+        saved_minutes = self.config.get("update_minutes", UPDATE_INTERVAL // 60000)
+        saved_minutes = saved_minutes if saved_minutes in {5, 10, 15, 30, 60} else UPDATE_INTERVAL // 60000
+        self.weather_timer.start(saved_minutes * 60 * 1000)
 
         QTimer.singleShot(1000, self.update_weather)
 
@@ -135,83 +183,141 @@ class WeatherWidget(QMainWindow):
             self.show()
         self.lower()
 
-    def update_weather(self):
-        print("🌤️ Actualizando datos meteorológicos...")
+    def default_position(self):
+        screen = QApplication.primaryScreen()
+        if screen is None:
+            return QPoint(60, 60)
+        area = screen.availableGeometry()
+        return QPoint(area.right() - self.width() - 59, area.bottom() - self.height() - 59)
+
+    def restore_position(self):
+        saved = self.config.get("position")
+        if not isinstance(saved, dict):
+            return self.default_position()
         try:
-            coords = self.get_coordinates()
-            if coords:
-                lat, lon, city = coords
-                self.city = city
-                print(f"📍 Ubicación: {city} ({lat}, {lon})")
+            x, y = int(saved["x"]), int(saved["y"])
+            widget_rect = QRect(x, y, self.width(), self.height())
+        except (KeyError, TypeError, ValueError, OverflowError):
+            return self.default_position()
 
-                weather_data = None
-                weather_data = self.get_openmeteo_weather(lat, lon)
-                if not weather_data:
-                    weather_data = self.get_weatherapi_weather(lat, lon)
-                if not weather_data:
-                    weather_data = self.get_7timer_weather(lat, lon)
+        for screen in QApplication.screens():
+            if screen.availableGeometry().contains(widget_rect):
+                return QPoint(x, y)
 
-                if weather_data:
-                    self.weather.update(weather_data)
-                    
-                    # Guardar en caché
-                    self.save_config('cache', {'weather': self.weather, 'city': self.city})
-                    
-                    print("✅ Datos meteorológicos actualizados")
-                    print(f"🌡️ {self.weather['temp']}°C - {self.weather['desc']}")
-                else:
-                    print("❌ No se pudieron obtener datos meteorológicos")
-            else:
-                print("❌ No se pudo obtener ubicación")
+        # The monitor layout may have changed. Keep the widget fully reachable.
+        return self.default_position()
 
+    def save_position(self):
+        position = self.pos()
+        self.base_pos = QPoint(position)
+        self.save_config("position", {"x": position.x(), "y": position.y()})
+
+    def update_weather(self):
+        self.weather_request_id += 1
+        request_id = self.weather_request_id
+        if self.weather_loading:
+            self.refresh_pending = True
+            return
+        self.weather_loading = True
+        worker = WeatherWorker(request_id, self.fetch_weather)
+        worker.signals.result.connect(self.weather_updated)
+        worker.signals.error.connect(self.weather_failed)
+        worker.signals.finished.connect(
+            lambda finished_id, current=worker: self.weather_finished(finished_id, current)
+        )
+        self.weather_workers.add(worker)
+        worker.start()
+
+    def fetch_weather(self):
+        """Fetch and validate one snapshot. This method runs in a worker thread."""
+        print("🌤️ Actualizando datos meteorológicos...")
+        coords = self.get_coordinates()
+        if not coords:
+            raise RuntimeError("No se pudo determinar la ubicación")
+        lat, lon, city = coords
+        print(f"📍 Ubicación: {city}")
+
+        weather_data = self.get_openmeteo_weather(lat, lon)
+        if not weather_data:
+            weather_data = self.get_weatherapi_weather(lat, lon)
+        if not weather_data:
+            weather_data = self.get_7timer_weather(lat, lon)
+        if not weather_data:
+            raise RuntimeError("No se pudieron obtener datos meteorológicos")
+        is_day = bool(weather_data.pop("is_day", 6 <= datetime.now().hour <= 20))
+        return {"weather": weather_data, "city": city, "is_day": is_day}
+
+    def weather_updated(self, request_id, snapshot):
+        if self.is_closing or request_id != self.weather_request_id:
+            return
+        try:
+            self.city = snapshot["city"]
+            self.weather.update(snapshot["weather"])
+            self.is_day = snapshot["is_day"]
+            self.save_config('cache', {'weather': self.weather, 'city': self.city})
+            print("✅ Datos meteorológicos actualizados")
+            print(f"🌡️ {self.weather['temp']}°C - {self.weather['desc']}")
         except Exception as e:
-            print(f"⚠️ Error al actualizar: {e}")
-
-        current_hour = datetime.now().hour
-        self.is_day = 6 <= current_hour <= 20
+            print(f"⚠️ Respuesta meteorológica inválida: {e}")
         self.update()
+
+    def weather_failed(self, request_id, message):
+        if not self.is_closing and request_id == self.weather_request_id:
+            print(f"⚠️ Error al actualizar: {message}; se conservan los últimos datos válidos")
+
+    def weather_finished(self, request_id, worker):
+        self.weather_workers.discard(worker)
+        self.weather_loading = False
+        if self.is_closing:
+            return
+        if self.refresh_pending or request_id != self.weather_request_id:
+            self.refresh_pending = False
+            QTimer.singleShot(0, self.update_weather)
 
     def get_coordinates(self):
         # 1. Intentar usar ciudad manual si existe
         if self.manual_city:
             print(f"🔎 Buscando coordenadas para ciudad manual: {self.manual_city}")
             coords = self.get_coordinates_from_city(self.manual_city)
-            if coords: return coords
+            if coords:
+                return coords
+            raise RuntimeError(f"No se encontró la ciudad «{self.manual_city}»")
             
         # 2. Geolocalización automática por IP
         try:
             response = requests.get("https://ipapi.co/json/", timeout=10)
-            if response.status_code == 200:
-                data = response.json()
-                return data.get('latitude'), data.get('longitude'), data.get('city', 'Madrid')
-        except: pass
-        try:
-            response = requests.get("http://ip-api.com/json/", timeout=10)
-            if response.status_code == 200:
-                data = response.json()
-                return data.get('lat'), data.get('lon'), data.get('city', 'Madrid')
-        except: pass
-        return 40.4168, -3.7038, "Madrid"
+            response.raise_for_status()
+            data = response.json()
+            lat, lon = float(data["latitude"]), float(data["longitude"])
+            if not (-90 <= lat <= 90 and -180 <= lon <= 180):
+                raise ValueError("coordenadas IP fuera de rango")
+            return lat, lon, str(data.get('city') or 'Ubicación actual')
+        except (requests.RequestException, KeyError, TypeError, ValueError) as exc:
+            raise RuntimeError("No se pudo determinar la ubicación por IP") from exc
 
     def get_openmeteo_weather(self, lat, lon):
         try:
             params = {
                 'latitude': lat, 'longitude': lon,
-                'current': 'temperature_2m,relative_humidity_2m,weather_code,wind_speed_10m,surface_pressure',
+                'current': 'temperature_2m,apparent_temperature,relative_humidity_2m,weather_code,wind_speed_10m,surface_pressure,visibility,is_day',
                 'timezone': 'auto'
             }
             response = requests.get("https://api.open-meteo.com/v1/forecast", params=params, timeout=15)
+            response.raise_for_status()
             if response.status_code == 200:
-                data = response.json()['current']
+                payload = response.json()
+                data = payload['current']
                 code = data.get('weather_code', 0)
                 desc, raw_desc = self.wmo_to_description(code)
                 return {
                     "temp": str(int(data['temperature_2m'])), "desc": desc, "raw_desc": raw_desc,
                     "humidity": str(int(data['relative_humidity_2m'])),
-                    "windspeed": str(int(data['wind_speed_10m'] * 3.6)),
-                    "feelslike": str(int(data['temperature_2m'] + 2)),
+                    "windspeed": str(int(data['wind_speed_10m'])),
+                    "feelslike": str(int(data['apparent_temperature'])),
                     "pressure": str(int(data['surface_pressure'])),
-                    "cloud": self.weather_code_to_cloud(code), "visibility": "10"
+                    "cloud": self.weather_code_to_cloud(code),
+                    "visibility": str(round(float(data['visibility']) / 1000, 1)),
+                    "is_day": bool(data['is_day'])
                 }
         except Exception as e: print(f"❌ Open-Meteo error: {e}")
         return None
@@ -220,6 +326,7 @@ class WeatherWidget(QMainWindow):
         try:
             params = {'lon': lon, 'lat': lat, 'product': 'civil', 'output': 'json'}
             response = requests.get("https://www.7timer.info/bin/api.pl", params=params, timeout=15)
+            response.raise_for_status()
             if response.status_code == 200:
                 data = response.json()['dataseries'][0]
                 desc, raw_desc = self.seven_timer_to_description(data['weather'])
@@ -237,7 +344,8 @@ class WeatherWidget(QMainWindow):
         if not api_key or api_key == "demo": return None
         try:
             params = {'key': api_key, 'q': f"{lat},{lon}", 'aqi': 'no'}
-            response = requests.get("http://api.weatherapi.com/v1/current.json", params=params, timeout=15)
+            response = requests.get("https://api.weatherapi.com/v1/current.json", params=params, timeout=15)
+            response.raise_for_status()
             if response.status_code == 200:
                 data = response.json()['current']
                 desc = data['condition']['text']
@@ -349,6 +457,12 @@ class WeatherWidget(QMainWindow):
 
     def closeEvent(self, event):
         self.is_closing = True
+        self.weather_request_id += 1
+        self.refresh_pending = False
+        self.weather_timer.stop()
+        self.position_timer.stop()
+        self.anim_timer.stop()
+        self.save_position()
         print("🚪 Cerrando widget...")
         event.accept()
 
@@ -398,13 +512,15 @@ class WeatherWidget(QMainWindow):
             if dist < 5:
                 self.show_extra_info = not self.show_extra_info
                 self.target_height = 195.0 if self.show_extra_info else 135.0
+            else:
+                self.save_position()
             event.accept()
 
     def contextMenuEvent(self, event):
         menu = QMenu(self)
-        menu.addAction("🎨 Estilo Colorido", lambda: setattr(self, 'icon_style', 'emoji') or self.update())
-        menu.addAction("📱 Estilo Plano", lambda: setattr(self, 'icon_style', 'flat') or self.update())
-        menu.addAction("⚪ Estilo Minimal", lambda: setattr(self, 'icon_style', 'minimal') or self.update())
+        menu.addAction("🎨 Estilo Colorido", lambda: self.set_icon_style('emoji'))
+        menu.addAction("📱 Estilo Plano", lambda: self.set_icon_style('flat'))
+        menu.addAction("⚪ Estilo Minimal", lambda: self.set_icon_style('minimal'))
         menu.addSeparator()
         menu.addAction("🔄 Actualizar Clima", self.update_weather)
         menu.addAction("🏙️ Cambiar Ciudad", self.prompt_change_city)
@@ -424,8 +540,16 @@ class WeatherWidget(QMainWindow):
     def change_update_interval(self, minutes):
         new_interval = minutes * 60 * 1000
         self.weather_timer.setInterval(new_interval)
+        self.save_config("update_minutes", minutes)
         print(f"⏱️ Intervalo cambiado a {minutes} minutos")
         self.update_weather()
+
+    def set_icon_style(self, style):
+        if style not in {"emoji", "flat", "minimal"}:
+            return
+        self.icon_style = style
+        self.save_config("icon_style", style)
+        self.update()
 
     def animate(self):
         for drop in self.rain_drops: drop["y"] = (drop["y"] + 6) % 60
@@ -441,6 +565,8 @@ class WeatherWidget(QMainWindow):
             
         # Interpolación suave de altura para el efecto expandible
         self.current_height += (self.target_height - self.current_height) * 0.25
+        if abs(self.height() - self.current_height) >= 1:
+            self.resize(self.width(), round(self.current_height))
         
         self.update()
 
@@ -612,42 +738,68 @@ class WeatherWidget(QMainWindow):
     def load_config(self):
         """Carga la configuración guardada (ciudad manual, estilo, etc)"""
         try:
-            config_path = os.path.expanduser("~/.config/weather_widget_config.json")
-            if os.path.exists(config_path):
-                import json
-                with open(config_path, 'r') as f:
-                    return json.load(f)
-        except: pass
+            config_path = self.config_path()
+            if config_path.is_file():
+                data = json.loads(config_path.read_text(encoding="utf-8"))
+                return data if isinstance(data, dict) else {}
+        except (OSError, ValueError, TypeError):
+            pass
         return {}
+
+    @staticmethod
+    def config_path():
+        return Path(os.environ.get("XDG_CONFIG_HOME") or (Path.home() / ".config")) / "weather_widget_config.json"
 
     def save_config(self, key, value):
         """Guarda una configuración específica"""
+        temp_name = None
         try:
-            config_path = os.path.expanduser("~/.config/weather_widget_config.json")
+            config_path = self.config_path()
+            config_path.parent.mkdir(parents=True, exist_ok=True)
             config = self.load_config()
             config[key] = value
-            import json
-            with open(config_path, 'w') as f:
-                json.dump(config, f)
+            with NamedTemporaryFile(
+                "w", encoding="utf-8", dir=config_path.parent,
+                prefix=f".{config_path.name}.", delete=False,
+            ) as handle:
+                json.dump(config, handle, ensure_ascii=False, indent=2)
+                handle.write("\n")
+                handle.flush()
+                os.fsync(handle.fileno())
+                temp_name = handle.name
+            os.replace(temp_name, config_path)
+            temp_name = None
+            self.config = config
         except Exception as e:
             print(f"Error guardando config: {e}")
+        finally:
+            if temp_name:
+                try:
+                    Path(temp_name).unlink(missing_ok=True)
+                except OSError:
+                    pass
 
     def prompt_change_city(self):
         """Muestra un diálogo para cambiar la ciudad manualmente"""
         from PyQt6.QtWidgets import QInputDialog
         text, ok = QInputDialog.getText(self, 'Cambiar Ciudad', 'Introduce el nombre de tu ciudad:')
-        if ok and text:
-            self.manual_city = text
-            self.save_config('manual_city', text)
-            print(f"🏙️ Ciudad cambiada manualmente a: {text}")
+        if ok:
+            city = text.strip()
+            self.manual_city = city or None
+            self.save_config('manual_city', city)
+            print(f"🏙️ Ciudad cambiada a: {city or 'ubicación automática'}")
             self.update_weather()
 
     def get_coordinates_from_city(self, city_name):
         """Obtiene coordenadas a partir del nombre de una ciudad (Geocoding)"""
         try:
             # Usando Open-Meteo Geocoding API (Gratuita y no requiere key)
-            url = f"https://geocoding-api.open-meteo.com/v1/search?name={city_name}&count=1&language=es&format=json"
-            response = requests.get(url, timeout=10)
+            response = requests.get(
+                "https://geocoding-api.open-meteo.com/v1/search",
+                params={"name": city_name, "count": 1, "language": "es", "format": "json"},
+                timeout=10,
+            )
+            response.raise_for_status()
             if response.status_code == 200:
                 data = response.json()
                 if 'results' in data and len(data['results']) > 0:
@@ -660,9 +812,9 @@ class WeatherWidget(QMainWindow):
     def create_autostart_entry(self):
         """Creates a .desktop entry for autostart on Linux"""
         try:
-            autostart_dir = os.path.expanduser("~/.config/autostart")
-            if not os.path.exists(autostart_dir):
-                os.makedirs(autostart_dir)
+            config_home = Path(os.environ.get("XDG_CONFIG_HOME") or (Path.home() / ".config"))
+            autostart_dir = config_home / "autostart"
+            autostart_dir.mkdir(parents=True, exist_ok=True)
             
             # Determine executable path
             if getattr(sys, 'frozen', False):
@@ -672,7 +824,7 @@ class WeatherWidget(QMainWindow):
                 # Running as script
                 exec_cmd = f'"{sys.executable}" "{os.path.abspath(__file__)}"'
             
-            desktop_file = os.path.join(autostart_dir, "WeatherWidget.desktop")
+            desktop_file = autostart_dir / "WeatherWidget.desktop"
             
             content = f"""[Desktop Entry]
 Type=Application
@@ -684,8 +836,8 @@ Terminal=false
 Categories=Utility;
 X-GNOME-Autostart-enabled=true
 """
-            with open(desktop_file, "w") as f:
-                f.write(content)
+            if not desktop_file.is_file() or desktop_file.read_text(encoding="utf-8") != content:
+                desktop_file.write_text(content, encoding="utf-8")
             print(f"✅ Autostart configurado en: {desktop_file}")
             
         except Exception as e:
@@ -693,8 +845,10 @@ X-GNOME-Autostart-enabled=true
 
     def showEvent(self, event):
         super().showEvent(event)
-        # Configure autostart on first show
-        QTimer.singleShot(1000, self.create_autostart_entry)
+        # Configure autostart once; Show Desktop can emit repeated show events.
+        if not self.autostart_scheduled:
+            self.autostart_scheduled = True
+            QTimer.singleShot(1000, self.create_autostart_entry)
 
 # ---------------- EJECUCIÓN ----------------
 if __name__ == "__main__":
