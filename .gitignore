@@ -6,3 +6,6 @@ myenv/
 build/
 dist/
 .venv/
+.package-build/
+*.deb
+*.deb.sha256

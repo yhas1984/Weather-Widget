@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-VERSION="${1:-5.0.1}"
+VERSION="${1:-5.0.3}"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BUILD="${ROOT}/.package-build"
 DIST="${ROOT}/dist"
@@ -54,4 +54,6 @@ dpkg-deb --build --root-owner-group "${PKG}" "${OUT}"
 dpkg-deb --info "${OUT}"
 dpkg-deb --contents "${OUT}" | grep -E 'opt/weather-widget/WeatherWidget|usr/bin/weather-widget|usr/share/applications|SOURCE.txt'
 file "${DIST}/WeatherWidget"
+sha256sum "${OUT}" > "${OUT}.sha256"
 echo "created ${OUT}"
+echo "created ${OUT}.sha256"
