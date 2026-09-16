@@ -2,7 +2,7 @@ import sys
 import threading
 import requests
 from PyQt6.QtWidgets import QApplication, QMainWindow, QWidget, QMenu
-from PyQt6.QtCore import QObject, Qt, QTimer, QPoint, QPointF, QRectF, pyqtSignal
+from PyQt6.QtCore import QObject, Qt, QTimer, QPoint, QPointF, QRect, QRectF, pyqtSignal
 from PyQt6.QtGui import QPainter, QColor, QPen, QFont, QLinearGradient, QBrush, QPolygonF, QRadialGradient
 import math
 import random
@@ -159,8 +159,7 @@ class WeatherWidget(QMainWindow):
         self.sun_angle, self.lightning_flash = 0, 0
         self.is_day = True
 
-        screen = QApplication.primaryScreen().geometry()
-        self.base_pos = QPoint(screen.width() - self.width() - 60, screen.height() - self.height() - 60)
+        self.base_pos = self.restore_position()
         self.move(self.base_pos)
 
         self.position_timer = QTimer(self)
@@ -183,6 +182,35 @@ class WeatherWidget(QMainWindow):
         if not self.isVisible():
             self.show()
         self.lower()
+
+    def default_position(self):
+        screen = QApplication.primaryScreen()
+        if screen is None:
+            return QPoint(60, 60)
+        area = screen.availableGeometry()
+        return QPoint(area.right() - self.width() - 59, area.bottom() - self.height() - 59)
+
+    def restore_position(self):
+        saved = self.config.get("position")
+        if not isinstance(saved, dict):
+            return self.default_position()
+        try:
+            x, y = int(saved["x"]), int(saved["y"])
+            widget_rect = QRect(x, y, self.width(), self.height())
+        except (KeyError, TypeError, ValueError, OverflowError):
+            return self.default_position()
+
+        for screen in QApplication.screens():
+            if screen.availableGeometry().contains(widget_rect):
+                return QPoint(x, y)
+
+        # The monitor layout may have changed. Keep the widget fully reachable.
+        return self.default_position()
+
+    def save_position(self):
+        position = self.pos()
+        self.base_pos = QPoint(position)
+        self.save_config("position", {"x": position.x(), "y": position.y()})
 
     def update_weather(self):
         self.weather_request_id += 1
@@ -434,6 +462,7 @@ class WeatherWidget(QMainWindow):
         self.weather_timer.stop()
         self.position_timer.stop()
         self.anim_timer.stop()
+        self.save_position()
         print("🚪 Cerrando widget...")
         event.accept()
 
@@ -483,6 +512,8 @@ class WeatherWidget(QMainWindow):
             if dist < 5:
                 self.show_extra_info = not self.show_extra_info
                 self.target_height = 195.0 if self.show_extra_info else 135.0
+            else:
+                self.save_position()
             event.accept()
 
     def contextMenuEvent(self, event):

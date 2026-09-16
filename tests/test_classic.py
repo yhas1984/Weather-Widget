@@ -151,6 +151,33 @@ class ClassicWidgetTests(unittest.TestCase):
         script = Path(__file__).parents[1] / "packaging" / "build-deb.sh"
         self.assertNotIn("export QT_QPA_PLATFORM", script.read_text(encoding="utf-8"))
 
+    def test_window_position_is_restored_on_next_start(self):
+        first = self.widget()
+        first.move(120, 90)
+        first.save_position()
+        first.close()
+
+        second = self.widget()
+        try:
+            self.assertEqual((second.x(), second.y()), (120, 90))
+            self.assertEqual(second.config["position"], {"x": 120, "y": 90})
+        finally:
+            second.close()
+
+    def test_unreachable_saved_position_falls_back_to_visible_screen(self):
+        config_path = Path(self.temp.name) / "weather_widget_config.json"
+        config_path.write_text(
+            '{"position": {"x": 999999999999999999999, "y": -999999999999999999999}}',
+            encoding="utf-8",
+        )
+        widget = self.widget()
+        try:
+            self.assertTrue(
+                any(screen.availableGeometry().contains(widget.geometry()) for screen in QApplication.screens())
+            )
+        finally:
+            widget.close()
+
 
 if __name__ == "__main__":
     unittest.main()
