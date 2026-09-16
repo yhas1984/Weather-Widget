@@ -15,7 +15,6 @@ install -m 0755 "${DIST}/WeatherWidget" "${PKG}/opt/weather-widget/WeatherWidget
 
 cat > "${PKG}/usr/bin/weather-widget" <<'EOF'
 #!/bin/sh
-export QT_QPA_PLATFORM="${QT_QPA_PLATFORM:-xcb}"
 exec /opt/weather-widget/WeatherWidget "$@"
 EOF
 chmod 0755 "${PKG}/usr/bin/weather-widget"
