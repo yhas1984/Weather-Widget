@@ -110,10 +110,10 @@ Open-Meteo funciona sin credenciales. WeatherAPI es opcional: define `WEATHERAPI
 
 ```bash
 python -m pip install -r requirements.txt
-bash packaging/build-deb.sh 5.0.3
+bash packaging/build-deb.sh 5.0.4
 ```
 
-Al crear un tag `v5.0.3`, GitHub Actions compila el paquete y lo publica automáticamente como asset del release.
+Al crear un tag `v5.0.4`, GitHub Actions compila el paquete y lo publica automáticamente como asset del release.
 
 ## Licencia
 

@@ -149,7 +149,57 @@ class ClassicWidgetTests(unittest.TestCase):
 
     def test_package_launcher_does_not_force_xcb(self):
         script = Path(__file__).parents[1] / "packaging" / "build-deb.sh"
-        self.assertNotIn("export QT_QPA_PLATFORM", script.read_text(encoding="utf-8"))
+        content = script.read_text(encoding="utf-8")
+        self.assertNotIn("export QT_QPA_PLATFORM", content)
+        self.assertIn('VERSION="${1:-5.0.4}"', content)
+        self.assertIn("Icon=weather-widget", content)
+        self.assertIn("StartupWMClass=WeatherWidget", content)
+        self.assertIn("weather-widget.png", content)
+
+    def test_window_uses_the_packaged_application_icon(self):
+        widget = self.widget()
+        try:
+            self.assertTrue(weather_widget.application_icon_path().is_file())
+            self.assertFalse(widget.windowIcon().isNull())
+        finally:
+            widget.close()
+
+    def test_generated_legacy_launchers_are_removed(self):
+        autostart = Path(self.temp.name) / "autostart" / "WeatherWidget.desktop"
+        autostart.parent.mkdir(parents=True)
+        autostart.write_text(
+            "[Desktop Entry]\nName=WeatherWidget\nComment=Desktop Weather Widget\n"
+            "X-GNOME-Autostart-enabled=true\n",
+            encoding="utf-8",
+        )
+        layout = Path(self.temp.name) / "deepin" / "dde-launchpad" / "item-arrangement.ini"
+        layout.parent.mkdir(parents=True)
+        layout.write_text(
+            "toplevel\\pageItems\\0=alpha.desktop, WeatherWidget.desktop, weather-widget.desktop\n",
+            encoding="utf-8",
+        )
+
+        widget = self.widget()
+        try:
+            self.assertFalse(autostart.exists())
+            updated = layout.read_text(encoding="utf-8")
+            self.assertNotIn("WeatherWidget.desktop", updated)
+            self.assertIn("weather-widget.desktop", updated)
+        finally:
+            widget.close()
+
+    def test_user_created_autostart_entry_is_preserved(self):
+        autostart = Path(self.temp.name) / "autostart" / "WeatherWidget.desktop"
+        autostart.parent.mkdir(parents=True)
+        autostart.write_text(
+            "[Desktop Entry]\nName=My custom weather command\nExec=/usr/local/bin/weather\n",
+            encoding="utf-8",
+        )
+        widget = self.widget()
+        try:
+            self.assertTrue(autostart.is_file())
+        finally:
+            widget.close()
 
     def test_window_position_is_restored_on_next_start(self):
         first = self.widget()
