@@ -54,6 +54,6 @@ dpkg-deb --build --root-owner-group "${PKG}" "${OUT}"
 dpkg-deb --info "${OUT}"
 dpkg-deb --contents "${OUT}" | grep -E 'opt/weather-widget/WeatherWidget|usr/bin/weather-widget|usr/share/applications|SOURCE.txt'
 file "${DIST}/WeatherWidget"
-sha256sum "${OUT}" > "${OUT}.sha256"
+(cd "${ROOT}" && sha256sum "$(basename "${OUT}")" > "$(basename "${OUT}").sha256")
 echo "created ${OUT}"
 echo "created ${OUT}.sha256"
